@@ -57,11 +57,15 @@ RUN file /src/runner && \
 # ── Stage 3: Scratch runtime ──────────────────────────────────────────────────
 FROM scratch
 
-# CA certificates for DNS resolution
+# CA certificates
 COPY --from=mtr-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
-# Static mtr binary
+# DNS config (needed even for static binaries)
+COPY --from=mtr-builder /etc/resolv.conf /etc/resolv.conf
+
+# Static mtr binaries (mtr spawns mtr-packet as a subprocess)
 COPY --from=mtr-builder /mtr-src/mtr /usr/bin/mtr
+COPY --from=mtr-builder /mtr-src/mtr-packet /usr/bin/mtr-packet
 
 # Static Go runner binary
 COPY --from=runner-builder /src/runner /runner
