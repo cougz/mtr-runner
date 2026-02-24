@@ -5,29 +5,30 @@ A Dockerized MTR (network diagnostic) runner that periodically executes `mtr` ag
 ## Features
 
 - Periodic network diagnostics with configurable intervals
-- JSON output for easy parsing and analysis
+- **Native JSON output** from mtr for easy parsing and analysis
 - Multiple destination support
-- **Multi-stage build**: Alpine (mtr static) + Go (runner static) → scratch
-- **True minimalism**: Only two static binaries, no shell, no libc, no Python
-- **Smallest possible footprint**: ~10MB total
+- **Multi-stage build**: Alpine 3.20 (mtr with JSON support) + Go (runner static) → Alpine runtime
+- **Minimal footprint**: Alpine-based (~10-15MB) with mtr built from source including jansson library
 - Automated CI/CD via GitHub Actions
 
 ## Architecture
 
-The image uses a three-stage build targeting `FROM scratch`:
+The image uses a three-stage build:
 
-1. **mtr-builder**: `debian:trixie-slim` installs build tooling and compiles
-   `mtr` from source as a fully static binary using `musl-gcc`
+1. **mtr-builder**: `alpine:3.20` with Alpine SDK installs build tooling and compiles
+   `mtr` from source with jansson support for JSON output
 2. **runner-builder**: `golang:1.22-bookworm` compiles the Go runner with
    `CGO_ENABLED=0` producing a fully static binary
-3. **Runtime**: `FROM scratch` — contains only two static binaries and
-   CA certificates. No shell, no package manager, no libc, no runtime
+3. **Runtime**: `FROM alpine:3.20` — contains mtr binaries, runner,
+   and required libraries (musl, jansson)
 
-Final image contains exactly:
-- `/usr/bin/mtr` — statically compiled mtr
+Final image contains:
+- `/usr/bin/mtr` — mtr compiled from source with JSON support
+- `/usr/bin/mtr-packet` — packet helper binary
 - `/runner` — statically compiled Go runner
-- `/etc/ssl/certs/ca-certificates.crt` — for DNS/TLS
-- `/etc/passwd` — for nonroot UID resolution
+- `/lib/libc.musl-x86_64.so.1` — musl C library
+- `/lib/ld-musl-x86_64.so.1` — musl dynamic linker
+- `/usr/lib/libjansson.so.4` — jansson library for JSON support
 
 ## Configuration
 
@@ -57,9 +58,7 @@ docker build -t mtr-runner .
 Run with `.env` file (bind mount):
 
 ```bash
-# Create data directory
 mkdir -p data
-sudo chown 0:0 data  # scratch runs as root (UID 0) inside container
 
 docker run --rm \
   --cap-add=NET_RAW \
@@ -81,17 +80,6 @@ docker run --rm \
   mtr-runner
 ```
 
-Verify it's scratch-based:
-
-```bash
-docker run --rm mtr-runner ls /
-# Should show only: data  etc  runner  usr
-# No /bin/sh, no /usr/bin/python, etc.
-
-docker run --rm mtr-runner sh
-# Error: No such file or directory (no shell in scratch)
-```
-
 ## Building Locally and Pushing to GHCR
 
 ```bash
@@ -100,10 +88,6 @@ echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-std
 
 # Build (expect several minutes — compiling mtr from source)
 docker build -t ghcr.io/cougz/mtr-runner:latest .
-
-# Verify it is scratch-based
-docker image inspect ghcr.io/cougz/mtr-runner:latest | grep Size
-docker run --rm ghcr.io/cougz/mtr-runner:latest ls 2>&1 || echo "No shell — correct"
 
 # Push
 docker push ghcr.io/cougz/mtr-runner:latest
@@ -115,9 +99,6 @@ docker push ghcr.io/cougz/mtr-runner:v2.0.0
 
 > ⚠️ **Important:**
 > - `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
-> - Scratch runs as UID 0 inside the container namespace. Use rootless Docker or user namespaces on the host for security.
-> - For bind mounts, the host directory must be writable by the container's UID (typically 0 or mapped to a non-root UID via user namespaces).
-> - This is a scratch image — no shell access for debugging.
 
 ## GitHub Actions CI/CD
 
@@ -147,8 +128,7 @@ docker run -d \
   ghcr.io/YOUR_USERNAME/mtr-runner:latest
 
 # Or with bind mount
-sudo mkdir -p /your/host/path
-sudo chown 0:0 /your/host/path
+mkdir -p /your/host/path
 docker run -d \
   --name mtr-runner \
   --cap-add=NET_RAW \
@@ -170,4 +150,7 @@ Output files are named: `{TIMESTAMP}_{SAFE_DESTINATION}.json`
 
 Example: `20250224T143000Z_1-1-1-1.json`
 
-The JSON output contains the full MTR report for analysis.
+The JSON output contains the full MTR report including:
+- Source and destination information
+- Packet statistics (count, loss%, best/worst/avg latency)
+- All hops with individual statistics
