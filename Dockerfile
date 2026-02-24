@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libncurses-dev \
     libjansson-dev \
     musl-tools \
+    ca-certificates \
+    pkg-config \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth=1 https://github.com/traviscross/mtr.git /mtr-src
@@ -21,6 +24,7 @@ WORKDIR /mtr-src
 RUN autoreconf -i && \
     CC=musl-gcc LDFLAGS="-static" ./configure \
         --without-gtk \
+        --without-jansson \
         --disable-shared \
         --enable-static && \
     make -j$(nproc)
@@ -36,6 +40,9 @@ FROM golang:1.22-bookworm AS runner-builder
 
 WORKDIR /src
 COPY go.mod runner.go ./
+
+RUN apt-get update && apt-get install -y --no-install-recommends file && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w" \
