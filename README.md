@@ -7,7 +7,8 @@ A Dockerized MTR (network diagnostic) runner that periodically executes `mtr` ag
 - Periodic network diagnostics with configurable intervals
 - JSON output for easy parsing and analysis
 - Multiple destination support
-- Small Docker image (~60MB) based on Debian Bookworm
+- Small Docker image (~60MB) based on Debian Trixie
+- Rootless container for improved security (runs as UID 1000)
 - Automated CI/CD via GitHub Actions
 
 ## Configuration
@@ -16,6 +17,8 @@ Create a `.env` file from the example:
 
 ```bash
 cp .env.example .env
+mkdir -p data
+chown 1000:1000 data  # Required for rootless container
 ```
 
 Edit `.env` with your preferences:
@@ -33,6 +36,13 @@ Build the image:
 
 ```bash
 docker build -t mtr-runner .
+```
+
+Prepare data directory:
+
+```bash
+mkdir -p data
+chown 1000:1000 data
 ```
 
 Run with `.env` file:
@@ -58,7 +68,9 @@ docker run --rm \
   mtr-runner
 ```
 
-> ⚠️ **Important:** `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
+> ⚠️ **Important:**
+> - `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
+> - The container runs as non-root user (UID 1000). Ensure your mounted data directory is writable by this user: `chown 1000:1000 ./data`
 
 ## GitHub Actions CI/CD
 
@@ -92,6 +104,10 @@ docker pull ghcr.io/YOUR_USERNAME/mtr-runner:latest
 Run the published image:
 
 ```bash
+# Prepare data directory
+sudo mkdir -p /your/host/path
+sudo chown 1000:1000 /your/host/path
+
 docker run -d \
   --name mtr-runner \
   --cap-add=NET_RAW \
@@ -99,6 +115,16 @@ docker run -d \
   --env-file .env \
   -v /your/host/path:/data/mtr \
   ghcr.io/YOUR_USERNAME/mtr-runner:latest
+```
+
+### Docker Compose
+
+```bash
+# Prepare data directory
+mkdir -p data
+chown 1000:1000 data
+
+docker compose up -d
 ```
 
 ## Output Format
