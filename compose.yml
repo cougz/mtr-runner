@@ -8,5 +8,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/data/mtr
-      # Note: ./data must be writable by UID 65532 (chown 65532:65532 ./data)
+      - mtr-data:/data/mtr
+
+volumes:
+  mtr-data:

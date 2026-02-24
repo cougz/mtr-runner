@@ -24,8 +24,6 @@ Create a `.env` file from the example:
 
 ```bash
 cp .env.example .env
-mkdir -p data
-chown 65532:65532 data  # Required for rootless distroless container
 ```
 
 Edit `.env` with your preferences:
@@ -45,14 +43,7 @@ Build the image:
 docker build -t mtr-runner .
 ```
 
-Prepare data directory:
-
-```bash
-mkdir -p data
-chown 65532:65532 data
-```
-
-Run with `.env` file:
+Run with `.env` file (bind mount):
 
 ```bash
 docker run --rm \
@@ -84,7 +75,8 @@ docker run --rm --cap-add=NET_RAW mtr-runner id
 
 > ⚠️ **Important:**
 > - `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
-> - The container runs as non-root user (UID 65532). Ensure your mounted data directory is writable by this user: `chown 65532:65532 ./data`
+> - Named volumes work automatically with correct permissions (no chown needed)
+> - For bind mounts, ensure your host directory is writable by UID 65532: `chown 65532:65532 ./data`
 > - This is a distroless image — no shell access for debugging
 
 ## GitHub Actions CI/CD
@@ -105,10 +97,18 @@ docker pull ghcr.io/YOUR_USERNAME/mtr-runner:latest
 Run the published image:
 
 ```bash
-# Prepare data directory
+# With named volume (recommended - no chown needed)
+docker run -d \
+  --name mtr-runner \
+  --cap-add=NET_RAW \
+  --restart unless-stopped \
+  --env-file .env \
+  -v mtr-data:/data/mtr \
+  ghcr.io/YOUR_USERNAME/mtr-runner:latest
+
+# Or with bind mount (requires chown)
 sudo mkdir -p /your/host/path
 sudo chown 65532:65532 /your/host/path
-
 docker run -d \
   --name mtr-runner \
   --cap-add=NET_RAW \
@@ -121,10 +121,6 @@ docker run -d \
 ### Docker Compose
 
 ```bash
-# Prepare data directory
-mkdir -p data
-chown 65532:65532 data
-
 docker compose up -d
 ```
 
