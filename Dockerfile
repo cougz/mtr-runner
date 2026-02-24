@@ -22,7 +22,7 @@ RUN git clone --depth=1 https://github.com/traviscross/mtr.git /mtr-src
 WORKDIR /mtr-src
 
 RUN autoreconf -i && \
-    CC=musl-gcc LDFLAGS="-static" ./configure \
+    CC=musl-gcc LDFLAGS="-static" CFLAGS="-I/usr/include" ./configure \
         --without-gtk \
         --disable-shared \
         --enable-static && \
