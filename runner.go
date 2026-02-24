@@ -28,23 +28,52 @@ func runMTR(mtrBin, dest string, count int, outputPath string) {
 	outfile := filepath.Join(outputPath, fmt.Sprintf("%s_%s.json", ts, sanitize(dest)))
 	fmt.Printf("[mtr-runner] Running mtr to %s -> %s\n", dest, outfile)
 
-	cmd := exec.Command(mtrBin, "-j", "-c", fmt.Sprintf("%d", count), dest)
+	// mtr 0.96 doesn't support JSON, use CSV instead
+	cmd := exec.Command(mtrBin, "-r", "-c", fmt.Sprintf("%d", count), "-n", dest)
 	out, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("[mtr-runner] ERROR: mtr failed for %s: %v\n", dest, err)
 		return
 	}
 
-	raw := strings.TrimSpace(string(out))
-	var parsed interface{}
-	if jsonErr := json.Unmarshal([]byte(raw), &parsed); jsonErr != nil {
-		fmt.Printf("[mtr-runner] WARNING: Output for %s was not valid JSON\n", dest)
-		os.WriteFile(outfile, []byte(raw), 0644)
-		return
+	// Parse CSV output and convert to JSON
+	data := parseMTRCSV(string(out))
+	pretty, _ := json.MarshalIndent(data, "", "  ")
+	os.WriteFile(outfile, pretty, 0644)
+}
+
+func parseMTRCSV(csv string) map[string]interface{} {
+	lines := strings.Split(strings.TrimSpace(csv), "\n")
+	if len(lines) < 1 {
+		return map[string]interface{}{"error": "no output"}
 	}
 
-	pretty, _ := json.MarshalIndent(parsed, "", "  ")
-	os.WriteFile(outfile, pretty, 0644)
+	// Parse header
+	headers := strings.Fields(strings.TrimSpace(lines[0]))
+	if len(headers) < 8 {
+		return map[string]interface{}{"error": "invalid output format"}
+	}
+
+	// Parse data rows
+	var hops []map[string]interface{}
+	for i := 1; i < len(lines); i++ {
+		fields := strings.Fields(strings.TrimSpace(lines[i]))
+		if len(fields) < len(headers) {
+			continue
+		}
+
+		hop := make(map[string]interface{})
+		for j, h := range headers {
+			hop[h] = fields[j]
+		}
+		hops = append(hops, hop)
+	}
+
+	return map[string]interface{}{
+		"destination": strings.Split(lines[len(lines)-1], " ")[0],
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"hops":      hops,
+	}
 }
 
 func main() {
