@@ -75,7 +75,8 @@ COPY --from=mtr-builder /etc/passwd /etc/passwd
 
 VOLUME ["/data/mtr"]
 
-USER 65532
+# Don't set USER here - run as root (UID 0) in container namespace
+# Users can use user namespaces on the host for security
 
 ENV MTR_BIN=/usr/bin/mtr \
     MTR_INTERVAL=300 \
