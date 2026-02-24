@@ -1,38 +1,30 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: Build mtr statically ────────────────────────────────────────────
-FROM debian:trixie-slim AS mtr-builder
+FROM alpine:3.20 AS mtr-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    autoconf \
+RUN apk add --no-cache \
+    alpine-sdk \
     automake \
-    libcap-dev \
-    libncurses-dev \
-    libjansson-dev \
-    musl-tools \
-    ca-certificates \
-    pkg-config \
-    file \
-    && rm -rf /var/lib/apt/lists/*
+    autoconf \
+    jansson-dev \
+    musl-dev \
+    linux-headers \
+    git
 
 RUN git clone --depth=1 https://github.com/traviscross/mtr.git /mtr-src
 
 WORKDIR /mtr-src
 
 RUN autoreconf -i && \
-    CC=musl-gcc LDFLAGS="-static" CFLAGS="-I/usr/include" ./configure \
+    ./configure \
         --without-gtk \
-        --disable-shared \
-        --enable-static && \
-    make -j$(nproc)
+        --without-cap && \
+    make -j$(nproc) && \
+    strip mtr mtr-packet
 
-# Confirm it is truly static — ldd should say "not a dynamic executable"
-RUN file /mtr-src/mtr && \
-    ldd /mtr-src/mtr 2>&1 | grep -q "not a dynamic" && \
-    echo "SUCCESS: mtr is fully static" || \
-    (echo "FAIL: mtr is not static" && exit 1)
+# Verify mtr binary exists and has JSON support
+RUN /mtr-src/mtr --help 2>&1 | grep -q json && echo "SUCCESS: mtr has JSON support" || exit 1
 
 # ── Stage 2: Build Go runner statically ──────────────────────────────────────
 FROM golang:1.22-bookworm AS runner-builder
@@ -54,28 +46,21 @@ RUN file /src/runner && \
     (echo "FAIL: runner is not static" && exit 1)
 
 # ── Stage 3: Scratch runtime ──────────────────────────────────────────────────
-FROM scratch
+FROM alpine:3.20
 
-# CA certificates
-COPY --from=mtr-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# Copy libraries needed by mtr
+COPY --from=mtr-builder /lib/ld-musl-x86_64.so.1 /lib/
+COPY --from=mtr-builder /lib/libc.musl-x86_64.so.1 /lib/
+COPY --from=mtr-builder /usr/lib/libjansson.so.4 /usr/lib/
 
-# DNS config (needed even for static binaries)
-COPY --from=mtr-builder /etc/resolv.conf /etc/resolv.conf
-
-# Static mtr binaries (mtr spawns mtr-packet as a subprocess)
+# Copy mtr binaries
 COPY --from=mtr-builder /mtr-src/mtr /usr/bin/mtr
 COPY --from=mtr-builder /mtr-src/mtr-packet /usr/bin/mtr-packet
 
 # Static Go runner binary
 COPY --from=runner-builder /src/runner /runner
 
-# /etc/passwd so nonroot uid is resolvable
-COPY --from=mtr-builder /etc/passwd /etc/passwd
-
 VOLUME ["/data/mtr"]
-
-# Don't set USER here - run as root (UID 0) in container namespace
-# Users can use user namespaces on the host for security
 
 ENV MTR_BIN=/usr/bin/mtr \
     MTR_INTERVAL=300 \
