@@ -7,16 +7,27 @@ A Dockerized MTR (network diagnostic) runner that periodically executes `mtr` ag
 - Periodic network diagnostics with configurable intervals
 - JSON output for easy parsing and analysis
 - Multiple destination support
-- **Multi-stage build**: Debian 13 (trixie) builder → distroless runtime
-- **Rootless**: Runs as non-root user (UID 65532)
-- **Distroless**: No shell, no package manager, minimal attack surface
+- **Multi-stage build**: Alpine (mtr static) + Go (runner static) → scratch
+- **True minimalism**: Only two static binaries, no shell, no libc, no Python
+- **Smallest possible footprint**: ~10MB total
 - Automated CI/CD via GitHub Actions
 
 ## Architecture
 
-The image uses a multi-stage build:
-1. **Builder stage**: `debian:trixie-slim` installs `mtr` and collects all required shared libraries
-2. **Runtime stage**: `gcr.io/distroless/python3-debian12:nonroot` contains only `mtr`, its dependencies, and Python 3 for the runner script
+The image uses a three-stage build targeting `FROM scratch`:
+
+1. **mtr-builder**: `debian:trixie-slim` installs build tooling and compiles
+   `mtr` from source as a fully static binary using `musl-gcc`
+2. **runner-builder**: `golang:1.22-bookworm` compiles the Go runner with
+   `CGO_ENABLED=0` producing a fully static binary
+3. **Runtime**: `FROM scratch` — contains only two static binaries and
+   CA certificates. No shell, no package manager, no libc, no runtime
+
+Final image contains exactly:
+- `/usr/bin/mtr` — statically compiled mtr
+- `/runner` — statically compiled Go runner
+- `/etc/ssl/certs/ca-certificates.crt` — for DNS/TLS
+- `/etc/passwd` — for nonroot UID resolution
 
 ## Configuration
 
@@ -37,7 +48,7 @@ Edit `.env` with your preferences:
 
 ## Local Testing
 
-Build the image:
+Build the image (takes a few minutes, compiles mtr from source):
 
 ```bash
 docker build -t mtr-runner .
@@ -46,6 +57,10 @@ docker build -t mtr-runner .
 Run with `.env` file (bind mount):
 
 ```bash
+# Create data directory
+mkdir -p data
+sudo chown 0:0 data  # scratch runs as root (UID 0) inside container
+
 docker run --rm \
   --cap-add=NET_RAW \
   --env-file .env \
@@ -66,18 +81,43 @@ docker run --rm \
   mtr-runner
 ```
 
-Verify it's running as nonroot:
+Verify it's scratch-based:
 
 ```bash
-docker run --rm --cap-add=NET_RAW mtr-runner id
-# Expected: uid=65532(nonroot) gid=65532(nonroot)
+docker run --rm mtr-runner ls /
+# Should show only: data  etc  runner  usr
+# No /bin/sh, no /usr/bin/python, etc.
+
+docker run --rm mtr-runner sh
+# Error: No such file or directory (no shell in scratch)
+```
+
+## Building Locally and Pushing to GHCR
+
+```bash
+# Login
+echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+# Build (expect several minutes — compiling mtr from source)
+docker build -t ghcr.io/cougz/mtr-runner:latest .
+
+# Verify it is scratch-based
+docker image inspect ghcr.io/cougz/mtr-runner:latest | grep Size
+docker run --rm ghcr.io/cougz/mtr-runner:latest ls 2>&1 || echo "No shell — correct"
+
+# Push
+docker push ghcr.io/cougz/mtr-runner:latest
+
+# Tag and push a version
+docker tag ghcr.io/cougz/mtr-runner:latest ghcr.io/cougz/mtr-runner:v2.0.0
+docker push ghcr.io/cougz/mtr-runner:v2.0.0
 ```
 
 > ⚠️ **Important:**
 > - `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
-> - Named volumes work automatically with correct permissions (no chown needed)
-> - For bind mounts, ensure your host directory is writable by UID 65532: `chown 65532:65532 ./data`
-> - This is a distroless image — no shell access for debugging
+> - Scratch runs as UID 0 inside the container namespace. Use rootless Docker or user namespaces on the host for security.
+> - For bind mounts, the host directory must be writable by the container's UID (typically 0 or mapped to a non-root UID via user namespaces).
+> - This is a scratch image — no shell access for debugging.
 
 ## GitHub Actions CI/CD
 
@@ -97,7 +137,7 @@ docker pull ghcr.io/YOUR_USERNAME/mtr-runner:latest
 Run the published image:
 
 ```bash
-# With named volume (recommended - no chown needed)
+# With named volume
 docker run -d \
   --name mtr-runner \
   --cap-add=NET_RAW \
@@ -106,9 +146,9 @@ docker run -d \
   -v mtr-data:/data/mtr \
   ghcr.io/YOUR_USERNAME/mtr-runner:latest
 
-# Or with bind mount (requires chown)
+# Or with bind mount
 sudo mkdir -p /your/host/path
-sudo chown 65532:65532 /your/host/path
+sudo chown 0:0 /your/host/path
 docker run -d \
   --name mtr-runner \
   --cap-add=NET_RAW \
