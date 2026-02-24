@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth=1 https://github.com/traviscross/mtr.git /mtr-src
+RUN git clone --depth=1 https://github.com/danmia/mtr.git /mtr-src
 
 WORKDIR /mtr-src
 
