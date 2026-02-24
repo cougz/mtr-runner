@@ -9,13 +9,13 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Collect mtr binary and all shared libs it needs into /collect
-RUN mkdir -p /collect/usr/sbin /collect/lib/$(uname -m)-linux-gnu
+RUN mkdir -p /collect/usr/bin /collect/lib/$(uname -m)-linux-gnu
 
-RUN cp /usr/sbin/mtr /collect/usr/sbin/mtr
+RUN cp /usr/bin/mtr /collect/usr/bin/mtr
 
 # Copy all shared libraries mtr depends on
-RUN ldd /usr/sbin/mtr | awk '/=>/ {print $3}' | xargs -I{} cp --parents {} /collect && \
-    ldd /usr/sbin/mtr | awk '/ld-linux/ {print $1}' | xargs -I{} cp --parents {} /collect || true
+RUN ldd /usr/bin/mtr | awk '/=>/ {print $3}' | xargs -I{} cp --parents {} /collect && \
+    ldd /usr/bin/mtr | awk '/ld-linux/ {print $1}' | xargs -I{} cp --parents {} /collect || true
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 # gcr.io/distroless/python3-debian12 is rootless by default (nonroot tag = uid 65532)
@@ -33,7 +33,7 @@ VOLUME ["/data/mtr"]
 # nonroot user (uid 65532) is the default in the :nonroot tag
 # No USER directive needed — distroless:nonroot already sets this
 
-ENV MTR_BIN=/usr/sbin/mtr \
+ENV MTR_BIN=/usr/bin/mtr \
     MTR_INTERVAL=300 \
     MTR_COUNT=10 \
     MTR_OUTPUT_PATH=/data/mtr \
