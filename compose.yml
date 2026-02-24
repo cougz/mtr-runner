@@ -1,0 +1,11 @@
+services:
+  mtr-runner:
+    image: ghcr.io/cougz/mtr-runner:latest
+    container_name: mtr-runner
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data/mtr
