@@ -7,9 +7,16 @@ A Dockerized MTR (network diagnostic) runner that periodically executes `mtr` ag
 - Periodic network diagnostics with configurable intervals
 - JSON output for easy parsing and analysis
 - Multiple destination support
-- Small Docker image (~60MB) based on Debian Trixie
-- Rootless container for improved security (runs as UID 1000)
+- **Multi-stage build**: Debian 13 (trixie) builder → distroless runtime
+- **Rootless**: Runs as non-root user (UID 65532)
+- **Distroless**: No shell, no package manager, minimal attack surface
 - Automated CI/CD via GitHub Actions
+
+## Architecture
+
+The image uses a multi-stage build:
+1. **Builder stage**: `debian:trixie-slim` installs `mtr` and collects all required shared libraries
+2. **Runtime stage**: `gcr.io/distroless/python3-debian12:nonroot` contains only `mtr`, its dependencies, and Python 3 for the runner script
 
 ## Configuration
 
@@ -18,7 +25,7 @@ Create a `.env` file from the example:
 ```bash
 cp .env.example .env
 mkdir -p data
-chown 1000:1000 data  # Required for rootless container
+chown 65532:65532 data  # Required for rootless distroless container
 ```
 
 Edit `.env` with your preferences:
@@ -42,7 +49,7 @@ Prepare data directory:
 
 ```bash
 mkdir -p data
-chown 1000:1000 data
+chown 65532:65532 data
 ```
 
 Run with `.env` file:
@@ -68,9 +75,17 @@ docker run --rm \
   mtr-runner
 ```
 
+Verify it's running as nonroot:
+
+```bash
+docker run --rm --cap-add=NET_RAW mtr-runner id
+# Expected: uid=65532(nonroot) gid=65532(nonroot)
+```
+
 > ⚠️ **Important:**
 > - `mtr` requires `NET_RAW` capability. Always pass `--cap-add=NET_RAW` when running the container.
-> - The container runs as non-root user (UID 1000). Ensure your mounted data directory is writable by this user: `chown 1000:1000 ./data`
+> - The container runs as non-root user (UID 65532). Ensure your mounted data directory is writable by this user: `chown 65532:65532 ./data`
+> - This is a distroless image — no shell access for debugging
 
 ## GitHub Actions CI/CD
 
@@ -78,20 +93,6 @@ The workflow automatically builds and publishes Docker images to GitHub Containe
 - Push to `main` branch
 - Tags matching `v*`
 - Manual workflow dispatch
-
-### Initial Git Setup
-
-```bash
-git init
-git add .
-git commit -m "feat: initial mtr-runner with GitHub Actions CI"
-
-# Add your GitHub remote (replace with your actual repo)
-git remote add origin https://github.com/YOUR_USERNAME/mtr-runner.git
-
-# Push to main — this triggers the workflow automatically
-git push -u origin main
-```
 
 ### Pull from GHCR
 
@@ -106,7 +107,7 @@ Run the published image:
 ```bash
 # Prepare data directory
 sudo mkdir -p /your/host/path
-sudo chown 1000:1000 /your/host/path
+sudo chown 65532:65532 /your/host/path
 
 docker run -d \
   --name mtr-runner \
@@ -122,7 +123,7 @@ docker run -d \
 ```bash
 # Prepare data directory
 mkdir -p data
-chown 1000:1000 data
+chown 65532:65532 data
 
 docker compose up -d
 ```
